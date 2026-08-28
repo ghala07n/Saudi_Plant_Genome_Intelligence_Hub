@@ -1,0 +1,8 @@
+gene_type,count,percentage
+protein_coding,20805,87.86
+lncRNA,1881,7.94
+snoRNA,564,2.38
+tRNA,324,1.37
+snRNA,77,0.33
+misc_RNA,21,0.09
+rRNA,7,0.03
