@@ -8,21 +8,36 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for professional styling
+# تخصيص التصميم والواجهة (Custom CSS)
 st.markdown("""
     <style>
+        /* خلفية عامة والخطوط */
         .main {
             background-color: #0e1117;
             color: #fafafa;
         }
+        /* تصميم البطاقات الإحصائية */
+        .metric-card {
+            background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #374151;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+        /* تخصيص العناوين */
         h1, h2, h3 {
             color: #10b981 !important;
             font-weight: 700;
         }
+        /* تنسيق الجداول */
+        dataframe {
+            border-radius: 8px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# Translations dictionary (English / Arabic)
+# قاموس الترجمة (عربي / إنجليزي)
 TRANSLATIONS = {
     "English": {
         "title": "🌱 Saudi Plant Genome Intelligence Hub",
@@ -40,7 +55,7 @@ TRANSLATIONS = {
         "gene_card_header": "Detailed Gene Card",
         "tab1": "Functional Categories",
         "tab2": "Chromosome Gene Density",
-        "tab3": "GC vs Gene Density (Spearman ρ = -0.4902)",
+        "tab3": "GC vs Gene Density",
         "tab4": "Genome Annotation Summary",
         "tab5": "Protein-Coding Stats",
         "explorer": "🔍 Salinity Candidate Explorer",
@@ -69,7 +84,7 @@ TRANSLATIONS = {
         "gene_card_header": "بطاقة الجين التفصيلية",
         "tab1": "التصنيفات الوظيفية",
         "tab2": "كثافة الجينات حسب الكروموسوم",
-        "tab3": "العلاقة بين محتوى GC وكثافة الجينات (Spearman ρ = -0.4902)",
+        "tab3": "العلاقة بين محتوى GC وكثافة الجينات",
         "tab4": "ملخص تعليقات الجينوم",
         "tab5": "إحصائيات التشفير البروتيني",
         "explorer": "🔍 مستكشف جينات الملوحة",
@@ -101,27 +116,27 @@ def load_data():
 
 candidates_df, gene_density_df, gc_density_df, genome_summary_df, chr_summary_df, protein_coding_df = load_data()
 
-# Sidebar Language Selector
+# اختيار اللغة من الشريط الجانبي
 st.sidebar.markdown("### 🌐 Language / اللغة")
 selected_lang = st.sidebar.selectbox("Choose Language", ["English", "العربية"])
 t = TRANSLATIONS[selected_lang]
 
-# Main Headers
+# العناوين الرئيسية
 st.title(t["title"])
 st.subheader(t["subtitle"])
 st.markdown("---")
 
 if candidates_df is not None:
-    # Top Metrics Dashboard
+    # البطاقات الإحصائية بتصميم مميز
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric(t["total_genes"], "23,679", "100% Genome")
+    col1.metric(t["total_genes"], "23,679", "100% Genome" if selected_lang=="English" else "100% الجينوم")
     col2.metric(t["protein_coding"], "20,805", "87.86%")
-    col3.metric(t["salinity_candidates"], f"{len(candidates_df):,}", "Target Traits")
-    col4.metric(t["chromosomes"], "18", "Complete Assembly")
+    col3.metric(t["salinity_candidates"], f"{len(candidates_df):,}", "Target Traits" if selected_lang=="English" else "السمات المستهدفة")
+    col4.metric(t["chromosomes"], "18", "Complete Assembly" if selected_lang=="English" else "الجمع التام")
 
     st.markdown("---")
 
-    # 1. Chromosome Explorer
+    # 1. مستكشف الكروموسومات
     st.markdown(f"### {t['chr_explorer']}")
     if gene_density_df is not None and not gene_density_df.empty:
         chr_col = [c for c in gene_density_df.columns if 'chr' in c.lower()][0]
@@ -140,7 +155,7 @@ if candidates_df is not None:
 
     st.markdown("---")
 
-    # 2. Gene Deep-Dive
+    # 2. تفاصيل الجين الفردي
     st.markdown(f"### {t['gene_details_title']}")
     if "gene_id" in candidates_df.columns:
         gene_list = candidates_df["gene_id"].tolist()
@@ -152,20 +167,20 @@ if candidates_df is not None:
         gcol1, gcol2 = st.columns(2)
         
         with gcol1:
-            st.info(f"**Functional Category:** {gene_row.get('functional_category', 'N/A')}")
-            st.write(f"**Chromosome:** {gene_row.get('chromosome', gene_row.get('chrom', 'N/A'))}")
-            st.write(f"**Start:** {gene_row.get('start', 'N/A')}")
-            st.write(f"**End:** {gene_row.get('end', 'N/A')}")
+            st.info(f"**Functional Category / التصنيف الوظيفي:** {gene_row.get('functional_category', 'N/A')}")
+            st.write(f"**Chromosome / الكروموسوم:** {gene_row.get('chromosome', gene_row.get('chrom', 'N/A'))}")
+            st.write(f"**Start / البداية:** {gene_row.get('start', 'N/A')}")
+            st.write(f"**End / النهاية:** {gene_row.get('end', 'N/A')}")
             
         with gcol2:
-            st.write(f"**Strand:** {gene_row.get('strand', 'N/A')}")
-            st.success(f"**Product Description:** {gene_row.get('product_description', gene_row.get('description', 'N/A'))}")
+            st.write(f"**Strand / الاتجاه:** {gene_row.get('strand', 'N/A')}")
+            st.success(f"**Product Description / وصف المنتج:** {gene_row.get('product_description', gene_row.get('description', 'N/A'))}")
     else:
         st.warning("Gene ID column not found.")
 
     st.markdown("---")
 
-    # 3. Overview & Interactive Visualizations
+    # 3. الرسوم البيانية الإحصائية الشاملة
     st.markdown(f"### {t['overview']}")
     tab1, tab2, tab3, tab4, tab5 = st.tabs([t["tab1"], t["tab2"], t["tab3"], t["tab4"], t["tab5"]])
     
@@ -188,7 +203,6 @@ if candidates_df is not None:
         if gc_density_df is not None and not gc_density_df.empty:
             cols = gc_density_df.columns
             st.scatter_chart(gc_density_df, x=cols[1], y=cols[2] if len(cols) > 2 else cols[1])
-            st.caption("Spearman Correlation (ρ) = -0.4902")
         else:
             st.info("Data not available.")
 
@@ -208,7 +222,7 @@ if candidates_df is not None:
 
     st.markdown("---")
 
-    # 4. Salinity Candidate Explorer
+    # مستكشف جينات الملوحة
     st.markdown(f"### {t['explorer']}")
     
     st.sidebar.markdown("---")
