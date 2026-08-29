@@ -1,1 +1,6 @@
 __pycache__/
+*.pyc
+*.pyo
+.DS_Store
+app_backup.py
+.ipynb_checkpoints/
