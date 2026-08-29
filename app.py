@@ -6,14 +6,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # Page configuration
-st.set_page_config(page_title="Saudi Plant Genome Intelligence Hub",
-                   layout="wide",
-                   initial_sidebar_state="expanded")
+st.set_page_config(page_title="Saudi Plant Genome Intelligence Hub (SPGIH)", layout="wide", initial_sidebar_state="expanded")
 
 # --- Translations ---
 TRANSLATIONS = {
     "English": {
-        "app_title": "Saudi Plant Genome Intelligence Hub",
+        "app_title": "Saudi Plant Genome Intelligence Hub (SPGIH)",
         "app_subtitle": "Phoenix dactylifera — Salinity Stress Candidate Genes & Genomic Explorer",
         "nav_overview": "Home / Overview",
         "nav_genome": "Genome Overview",
@@ -44,7 +42,7 @@ TRANSLATIONS = {
         "reset_filters": "Reset filters",
     },
     "العربية": {
-        "app_title": "مركز ذكاء جينوم النباتات السعودي",
+        "app_title": "مركز ذكاء جينوم النباتات السعودي (SPGIH)",
         "app_subtitle": "Phoenix dactylifera — الجينات المرشحة لتحمل الملوحة ومستكشف الجينوم",
         "nav_overview": "الصفحة الرئيسية / نظرة عامة",
         "nav_genome": "نظرة عامة على الجينوم",
@@ -78,8 +76,20 @@ TRANSLATIONS = {
 
 DATA_DIR = "data"
 
+# Fallback (validated) constants to keep the app stable when files are missing
+FALLBACKS = {
+    "chromosomes": 18,
+    "total_genes": 23679,
+    "protein_coding": 20805,
+    "salinity_candidates": 1795,
+    "genome_size_mb": 385.59,
+}
+
 @st.cache_data
 def load_datasets(data_dir=DATA_DIR):
+    """Load CSV files from the data directory. Return dict with DataFrames or None on failure.
+    This function is cached to improve interactive performance.
+    """
     files = {
         "candidates": "salinity_candidates_categorized.csv",
         "gene_density": "chromosome_gene_density.csv",
@@ -93,7 +103,7 @@ def load_datasets(data_dir=DATA_DIR):
         if os.path.exists(path):
             try:
                 out[key] = pd.read_csv(path)
-            except Exception as e:
+            except Exception:
                 out[key] = None
         else:
             out[key] = None
@@ -108,93 +118,125 @@ gc_density_df = data.get("gc_density")
 genome_summary_df = data.get("genome_summary")
 chr_summary_df = data.get("chr_summary")
 
+# Helper: safe dataframe check
+def df_ok(df):
+    return df is not None and isinstance(df, pd.DataFrame) and not df.empty
+
 # Sidebar: language and navigation
 with st.sidebar:
-    st.image("", width=1)  # spacing
+    # safe spacer instead of empty image
+    st.markdown("<br>", unsafe_allow_html=True)
     selected_lang = st.selectbox(TRANSLATIONS["English"]["language_label"], options=["English", "العربية"], index=0)
-    t = TRANSLATIONS[selected_lang]
+    t = TRANSLATIONS.get(selected_lang, TRANSLATIONS["English"])
     st.markdown("---")
-    nav = st.radio("", (t["nav_overview"], t["nav_genome"], t["nav_chr_explorer"], t["nav_candidates"], t["nav_gene"], t["nav_insights"], t["nav_salinity_research"], t["nav_methods"], t["nav_downloads"]))
+    nav_options = [
+        t["nav_overview"],
+        t["nav_genome"],
+        t["nav_chr_explorer"],
+        t["nav_candidates"],
+        t["nav_gene"],
+        t["nav_insights"],
+        t["nav_salinity_research"],
+        t["nav_methods"],
+        t["nav_downloads"],
+    ]
+    nav = st.radio("", nav_options)
     st.markdown("---")
     st.caption("Saudi Plant Genome Intelligence Hub — SPGIH")
 
-# Page header (hero)
-st.markdown(
-    f"<div style='display:flex;align-items:center;gap:16px'>"
-    f"<div style='flex:1'>"
-    f"<h1 style='margin:0'>{t['app_title']}</h1>"
-    f"<p style='margin:0;color:#666'>{t['app_subtitle']}</p>"
-    f"</div>"
-    f"<div style='width:220px;text-align:right'>"
-    f"<img src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'80\' viewBox=\'0 0 200 80\'><rect rx=\'8\' width=\'200\' height=\'80\' fill=\'%230f1724\'/><text x=\'10\' y=\'52\' fill=\'%23a7f3d0\' font-size=\'12\' font-family=\'Arial\'>SPGIH</text></svg>' alt='logo' style='max-width:220px'/>"
-    f"</div>"
-    f"</div>",
-    unsafe_allow_html=True,
-)
+# Page header (hero) — clean, no broken HTML
+st.markdown(f"### 🧬 {t['app_title']}")
+st.write(t["app_subtitle"])
 st.markdown("---")
 
-# Helper: safe dataframe check
-def df_ok(df):
-    return df is not None and not df.empty
-
-# Compute KPIs from data (do not hard-code)
+# Compute KPIs from data with safe fallbacks
 if df_ok(genome_summary_df):
-    total_genes = int(genome_summary_df['count'].sum())
+    try:
+        total_genes = int(genome_summary_df['count'].sum())
+    except Exception:
+        total_genes = FALLBACKS['total_genes']
 else:
-    # fallback to known validated number
-    total_genes = 23679
+    total_genes = FALLBACKS['total_genes']
 
 if df_ok(genome_summary_df):
-    protein_coding = int(genome_summary_df.loc[genome_summary_df['gene_type'] == 'protein_coding', 'count'].values[0])
+    try:
+        protein_coding = int(genome_summary_df.loc[genome_summary_df['gene_type'].str.contains('protein_coding', na=False), 'count'].sum())
+        # If the filtered sum is zero, fallback
+        if protein_coding == 0:
+            protein_coding = FALLBACKS['protein_coding']
+    except Exception:
+        protein_coding = FALLBACKS['protein_coding']
 else:
-    protein_coding = 20805
+    protein_coding = FALLBACKS['protein_coding']
 
 if df_ok(gene_density_df):
-    genome_size_mb = round(float(gene_density_df['length_Mb'].sum()), 2)
+    try:
+        # Prefer length_Mb when available, else try length_bp
+        if 'length_Mb' in gene_density_df.columns:
+            genome_size_mb = round(float(gene_density_df['length_Mb'].astype(float).sum()), 2)
+        elif 'length_bp' in gene_density_df.columns:
+            genome_size_mb = round(float(gene_density_df['length_bp'].astype(float).sum()) / 1e6, 2)
+        else:
+            genome_size_mb = FALLBACKS['genome_size_mb']
+    except Exception:
+        genome_size_mb = FALLBACKS['genome_size_mb']
 else:
-    genome_size_mb = 385.59
+    genome_size_mb = FALLBACKS['genome_size_mb']
 
-salinity_count = len(candidates_df) if df_ok(candidates_df) else 1795
-chromosome_count = len(gene_density_df) if df_ok(gene_density_df) else 18
+salinity_count = int(candidates_df.shape[0]) if df_ok(candidates_df) else FALLBACKS['salinity_candidates']
+chromosome_count = int(gene_density_df['chromosome'].nunique()) if df_ok(gene_density_df) and 'chromosome' in gene_density_df.columns else FALLBACKS['chromosomes']
 
-# KPI cards
-k1, k2, k3, k4, k5 = st.columns([1.2,1.2,1.2,1.2,1.2])
-with k1:
+# KPI cards - equal width columns
+cols = st.columns(5)
+with cols[0]:
     st.metric(label=t['kpi_chromosomes'], value=f"{chromosome_count}")
-with k2:
+with cols[1]:
     st.metric(label=t['kpi_total_genes'], value=f"{total_genes:,}")
-with k3:
+with cols[2]:
     st.metric(label=t['kpi_protein_coding'], value=f"{protein_coding:,}")
-with k4:
+with cols[3]:
     st.metric(label=t['kpi_salinity_candidates'], value=f"{salinity_count:,}")
-with k5:
+with cols[4]:
     st.metric(label=t['kpi_genome_size'], value=f"{genome_size_mb} Mb")
 
 st.markdown("---")
 
+# Utility: common layout for Plotly figures to avoid tick overlap and keep consistent style
+def finalize_figure(fig, title=None, rotate_xticks=True):
+    fig.update_layout(template='plotly_white', title=title or '', margin=dict(l=40, r=40, t=60, b=90))
+    if rotate_xticks:
+        fig.update_layout(xaxis_tickangle=-45, xaxis_automargin=True)
+    return fig
+
 # NAVIGATION HANDLERS
 if nav == t['nav_overview']:
     st.header(t['nav_overview'])
-    st.write("A bilingual Streamlit platform for exploration of the date palm nuclear genome and salinity stress candidate genes. Use the left navigation to explore genome-wide summaries, chromosome-level detail, and candidate gene annotations.")
-    # Small summary cards and plots
-    if df_ok(gene_density_df):
-        fig = px.bar(gene_density_df.sort_values('length_Mb', ascending=False), x='chromosome', y='length_Mb',
-                     labels={'length_Mb':'Length (Mb)','chromosome':'Chromosome'},
-                     title='Chromosome lengths')
-        fig.update_layout(margin=dict(l=10,r=10,t=40,b=10), template='plotly_white')
-        st.plotly_chart(fig, use_container_width=True)
+    st.write(t['app_subtitle'])
 
-    if df_ok(gc_density_df):
-        fig2 = px.scatter(gc_density_df, x='GC_percent', y='gene_density_per_Mb', text='chromosome',
-                          labels={'GC_percent':'GC %','gene_density_per_Mb':'Gene density (genes/Mb)'},
-                          title='GC % vs gene density per chromosome')
-        # add trendline using numpy polyfit on ranks (Spearman-like)
-        coeffs = np.polyfit(gc_density_df['GC_percent'], gc_density_df['gene_density_per_Mb'], 1)
-        x_line = np.linspace(gc_density_df['GC_percent'].min(), gc_density_df['GC_percent'].max(), 100)
-        y_line = coeffs[0] * x_line + coeffs[1]
-        fig2.add_traces(go.Line(x=x_line, y=y_line, name='Trend'))
-        fig2.update_traces(marker=dict(size=10), selector=dict(mode='markers'))
-        fig2.update_layout(margin=dict(l=10,r=10,t=40,b=10), template='plotly_white')
+    # Chromosome lengths
+    if df_ok(gene_density_df) and 'length_Mb' in gene_density_df.columns and 'chromosome' in gene_density_df.columns:
+        df_plot = gene_density_df.sort_values('length_Mb', ascending=False)
+        fig = px.bar(df_plot, x='chromosome', y='length_Mb', labels={'length_Mb': 'Length (Mb)', 'chromosome': 'Chromosome'}, title='Chromosome lengths')
+        finalize_figure(fig, rotate_xticks=True)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info(t['no_data'])
+
+    # GC vs gene density scatter with trendline (calculated from available columns)
+    if df_ok(gc_density_df) and {'GC_percent', 'gene_density_per_Mb', 'chromosome'}.issubset(gc_density_df.columns):
+        df_gc = gc_density_df.dropna(subset=['GC_percent', 'gene_density_per_Mb'])
+        fig2 = px.scatter(df_gc, x='GC_percent', y='gene_density_per_Mb', text='chromosome', labels={'GC_percent': 'GC %', 'gene_density_per_Mb': 'Gene density (genes/Mb)'}, title='GC % vs gene density per chromosome')
+        # add linear trendline computed with numpy
+        try:
+            x = df_gc['GC_percent'].astype(float)
+            y = df_gc['gene_density_per_Mb'].astype(float)
+            coeffs = np.polyfit(x, y, 1)
+            x_line = np.linspace(x.min(), x.max(), 100)
+            y_line = coeffs[0] * x_line + coeffs[1]
+            fig2.add_trace(go.Scatter(x=x_line, y=y_line, mode='lines', name='Trend', line=dict(color='firebrick')))
+        except Exception:
+            pass
+        finalize_figure(fig2, rotate_xticks=False)
         st.plotly_chart(fig2, use_container_width=True)
 
 elif nav == t['nav_genome']:
@@ -204,38 +246,38 @@ elif nav == t['nav_genome']:
         st.info(t['no_data'])
     else:
         # Chromosome length bar
-        fig_len = px.bar(gene_density_df.sort_values('length_Mb'), x='chromosome', y='length_Mb',
-                         labels={'length_Mb':'Length (Mb)'}, title='Chromosome lengths (Mb)',
-                         hover_data=['total_genes','protein_coding'])
-        fig_len.update_layout(template='plotly_white')
-        st.plotly_chart(fig_len, use_container_width=True)
+        if 'length_Mb' in gene_density_df.columns and 'chromosome' in gene_density_df.columns:
+            df_len = gene_density_df.sort_values('length_Mb')
+            fig_len = px.bar(df_len, x='chromosome', y='length_Mb', labels={'length_Mb': 'Length (Mb)'}, title='Chromosome lengths (Mb)', hover_data=[col for col in ['total_genes','protein_coding'] if col in gene_density_df.columns])
+            finalize_figure(fig_len)
+            st.plotly_chart(fig_len, use_container_width=True)
 
         # gene counts
-        fig_genes = px.bar(gene_density_df.sort_values('total_genes'), x='chromosome', y='total_genes',
-                          labels={'total_genes':'Total genes'}, title='Total genes per chromosome',
-                          hover_data=['length_Mb','gene_density_per_Mb'])
-        fig_genes.update_layout(template='plotly_white')
-        st.plotly_chart(fig_genes, use_container_width=True)
+        if 'total_genes' in gene_density_df.columns and 'chromosome' in gene_density_df.columns:
+            df_genes = gene_density_df.sort_values('total_genes')
+            fig_genes = px.bar(df_genes, x='chromosome', y='total_genes', labels={'total_genes': 'Total genes'}, title='Total genes per chromosome', hover_data=[col for col in ['length_Mb','gene_density_per_Mb'] if col in gene_density_df.columns])
+            finalize_figure(fig_genes)
+            st.plotly_chart(fig_genes, use_container_width=True)
 
         # protein-coding genes
-        fig_pc = px.bar(gene_density_df.sort_values('protein_coding'), x='chromosome', y='protein_coding',
-                       labels={'protein_coding':'Protein-coding genes'}, title='Protein-coding genes per chromosome',
-                       hover_data=['protein_coding_density_per_Mb'])
-        fig_pc.update_layout(template='plotly_white')
-        st.plotly_chart(fig_pc, use_container_width=True)
+        if 'protein_coding' in gene_density_df.columns and 'chromosome' in gene_density_df.columns:
+            df_pc = gene_density_df.sort_values('protein_coding')
+            fig_pc = px.bar(df_pc, x='chromosome', y='protein_coding', labels={'protein_coding': 'Protein-coding genes'}, title='Protein-coding genes per chromosome', hover_data=[col for col in ['protein_coding_density_per_Mb'] if col in gene_density_df.columns])
+            finalize_figure(fig_pc)
+            st.plotly_chart(fig_pc, use_container_width=True)
 
         # gene density
-        fig_gd = px.bar(gene_density_df.sort_values('gene_density_per_Mb'), x='chromosome', y='gene_density_per_Mb',
-                        labels={'gene_density_per_Mb':'Gene density (genes/Mb)'}, title='Gene density per chromosome',
-                        hover_data=['protein_coding_density_per_Mb'])
-        fig_gd.update_layout(template='plotly_white')
-        st.plotly_chart(fig_gd, use_container_width=True)
+        if 'gene_density_per_Mb' in gene_density_df.columns and 'chromosome' in gene_density_df.columns:
+            df_gd = gene_density_df.sort_values('gene_density_per_Mb')
+            fig_gd = px.bar(df_gd, x='chromosome', y='gene_density_per_Mb', labels={'gene_density_per_Mb':'Gene density (genes/Mb)'}, title='Gene density per chromosome', hover_data=[col for col in ['protein_coding_density_per_Mb'] if col in gene_density_df.columns])
+            finalize_figure(fig_gd)
+            st.plotly_chart(fig_gd, use_container_width=True)
 
         # GC percent
-        if df_ok(gc_density_df):
-            fig_gc = px.bar(gc_density_df.sort_values('GC_percent'), x='chromosome', y='GC_percent',
-                            labels={'GC_percent':'GC %'}, title='GC % per chromosome', hover_data=['gene_density_per_Mb'])
-            fig_gc.update_layout(template='plotly_white')
+        if df_ok(gc_density_df) and 'GC_percent' in gc_density_df.columns and 'chromosome' in gc_density_df.columns:
+            df_gcplot = gc_density_df.sort_values('GC_percent')
+            fig_gc = px.bar(df_gcplot, x='chromosome', y='GC_percent', labels={'GC_percent':'GC %'}, title='GC % per chromosome', hover_data=[col for col in ['gene_density_per_Mb'] if col in gc_density_df.columns])
+            finalize_figure(fig_gc)
             st.plotly_chart(fig_gc, use_container_width=True)
 
 elif nav == t['nav_chr_explorer']:
@@ -243,33 +285,35 @@ elif nav == t['nav_chr_explorer']:
     if not df_ok(gene_density_df):
         st.info(t['no_data'])
     else:
-        chr_list = gene_density_df['chromosome'].tolist()
+        chr_list = gene_density_df['chromosome'].astype(str).tolist() if 'chromosome' in gene_density_df.columns else []
         sel_chr = st.selectbox(t['filter_chr'], options=['All'] + chr_list)
         if sel_chr == 'All':
-            st.dataframe(gene_density_df.set_index('chromosome'), use_container_width=True)
+            st.dataframe(gene_density_df.set_index('chromosome') if 'chromosome' in gene_density_df.columns else gene_density_df, use_container_width=True)
         else:
-            row = gene_density_df[gene_density_df['chromosome'] == sel_chr].iloc[0]
+            row = gene_density_df[gene_density_df['chromosome'].astype(str) == str(sel_chr)].iloc[0]
             st.markdown(f"### {sel_chr}")
             cols = st.columns(2)
             with cols[0]:
-                st.write(f"Length (Mb): {row['length_Mb']}")
-                st.write(f"Total genes: {row['total_genes']}")
-                st.write(f"Protein-coding: {row['protein_coding']}")
+                st.write(f"Length (Mb): {row.get('length_Mb', 'N/A')}")
+                st.write(f"Total genes: {row.get('total_genes', 'N/A')}")
+                st.write(f"Protein-coding: {row.get('protein_coding', 'N/A')}")
             with cols[1]:
-                st.write(f"Gene density (genes/Mb): {row['gene_density_per_Mb']}")
-                st.write(f"Protein-coding density (genes/Mb): {row['protein_coding_density_per_Mb']}")
+                st.write(f"Gene density (genes/Mb): {row.get('gene_density_per_Mb', 'N/A')}")
+                st.write(f"Protein-coding density (genes/Mb): {row.get('protein_coding_density_per_Mb', 'N/A')}")
                 # deviation from genome average
-                avg_density = gene_density_df['gene_density_per_Mb'].mean()
-                deviation = float(row['gene_density_per_Mb']) - float(avg_density)
-                st.write(f"Deviation from genome average gene density: {deviation:.2f} genes/Mb")
+                try:
+                    avg_density = float(gene_density_df['gene_density_per_Mb'].astype(float).mean()) if 'gene_density_per_Mb' in gene_density_df.columns else None
+                    deviation = float(row.get('gene_density_per_Mb', 0)) - avg_density if avg_density is not None else None
+                    if deviation is not None:
+                        st.write(f"Deviation from genome average gene density: {deviation:.2f} genes/Mb")
+                except Exception:
+                    pass
 
         # Comparison chart
-        st.markdown("#### Chromosome comparison: gene density vs protein-coding density")
-        fig_cmp = px.scatter(gene_density_df, x='gene_density_per_Mb', y='protein_coding_density_per_Mb', color='chromosome',
-                             hover_name='chromosome', size='length_Mb',
-                             labels={'gene_density_per_Mb':'Gene density (genes/Mb)','protein_coding_density_per_Mb':'Protein-coding density (genes/Mb)'} )
-        fig_cmp.update_layout(template='plotly_white')
-        st.plotly_chart(fig_cmp, use_container_width=True)
+        if {'gene_density_per_Mb','protein_coding_density_per_Mb','chromosome','length_Mb'}.intersection(gene_density_df.columns):
+            fig_cmp = px.scatter(gene_density_df, x='gene_density_per_Mb', y='protein_coding_density_per_Mb', color='chromosome' if 'chromosome' in gene_density_df.columns else None, hover_name='chromosome' if 'chromosome' in gene_density_df.columns else None, size='length_Mb' if 'length_Mb' in gene_density_df.columns else None, labels={'gene_density_per_Mb':'Gene density (genes/Mb)','protein_coding_density_per_Mb':'Protein-coding density (genes/Mb)'} )
+            finalize_figure(fig_cmp, rotate_xticks=False)
+            st.plotly_chart(fig_cmp, use_container_width=True)
 
 elif nav == t['nav_candidates']:
     st.header(t['nav_candidates'])
@@ -277,19 +321,23 @@ elif nav == t['nav_candidates']:
         st.info(t['no_data'])
     else:
         # filters
-        cats = ['All'] + sorted(candidates_df['functional_category'].fillna('Unknown').unique().tolist())
+        cats = ['All'] + sorted(candidates_df['functional_category'].fillna('Unknown').unique().tolist()) if 'functional_category' in candidates_df.columns else ['All']
         selected_cat = st.selectbox(t['filter_category'], options=cats)
-        chr_options = ['All'] + sorted(candidates_df['chromosome'].unique().tolist())
+        chr_options = ['All'] + sorted(candidates_df['chromosome'].astype(str).unique().tolist()) if 'chromosome' in candidates_df.columns else ['All']
         selected_chr = st.selectbox(t['filter_chr'], options=chr_options)
         search = st.text_input('', placeholder=t['search_placeholder'])
 
         filtered = candidates_df.copy()
-        if selected_cat != 'All':
+        if selected_cat != 'All' and 'functional_category' in filtered.columns:
             filtered = filtered[filtered['functional_category'] == selected_cat]
-        if selected_chr != 'All':
-            filtered = filtered[filtered['chromosome'] == selected_chr]
-        if search:
-            mask = (filtered['gene_id'].str.contains(search, case=False, na=False)) | (filtered['product_description'].str.contains(search, case=False, na=False))
+        if selected_chr != 'All' and 'chromosome' in filtered.columns:
+            filtered = filtered[filtered['chromosome'].astype(str) == str(selected_chr)]
+        if search and any(col in filtered.columns for col in ['gene_id','product_description']):
+            mask = pd.Series([False] * len(filtered), index=filtered.index)
+            if 'gene_id' in filtered.columns:
+                mask = mask | filtered['gene_id'].astype(str).str.contains(search, case=False, na=False)
+            if 'product_description' in filtered.columns:
+                mask = mask | filtered['product_description'].astype(str).str.contains(search, case=False, na=False)
             filtered = filtered[mask]
 
         st.write(f"{t['showing_results']} **{len(filtered):,}** {t['results_count']}")
@@ -297,18 +345,21 @@ elif nav == t['nav_candidates']:
             st.info(t['table_no_matches'])
         else:
             st.dataframe(filtered, use_container_width=True)
-            csv = filtered.to_csv(index=False).encode('utf-8')
-            st.download_button(label=t['download_csv'], data=csv, file_name='filtered_salinity_candidates.csv', mime='text/csv')
+            try:
+                csv = filtered.to_csv(index=False).encode('utf-8')
+                st.download_button(label=t['download_csv'], data=csv, file_name='filtered_salinity_candidates.csv', mime='text/csv')
+            except Exception:
+                st.warning("Unable to prepare CSV for download.")
 
 elif nav == t['nav_gene']:
     st.header(t['nav_gene'])
     if not df_ok(candidates_df):
         st.info(t['no_data'])
     else:
-        gene_ids = candidates_df['gene_id'].tolist()
+        gene_ids = candidates_df['gene_id'].astype(str).tolist() if 'gene_id' in candidates_df.columns else []
         selected_gene = st.selectbox('Select gene', options=[''] + gene_ids)
         if selected_gene:
-            gene_row = candidates_df[candidates_df['gene_id'] == selected_gene].iloc[0]
+            gene_row = candidates_df[candidates_df['gene_id'].astype(str) == str(selected_gene)].iloc[0]
             st.subheader(f"{selected_gene}")
             cols = st.columns([2,3])
             with cols[0]:
@@ -320,16 +371,27 @@ elif nav == t['nav_gene']:
             with cols[1]:
                 # simple chromosome position visualization
                 try:
-                    chr_len_row = gene_density_df[gene_density_df['chromosome'] == gene_row['chromosome']].iloc[0]
-                    chr_len = float(chr_len_row['length_bp']) if 'length_bp' in chr_len_row.index else float(chr_len_row['length_Mb'] * 1e6)
-                    start = float(gene_row.get('start', 0))
-                    end = float(gene_row.get('end', 0))
-                    center = (start + end) / 2
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(x=[chr_len], y=[1], orientation='h', marker_color='#e6eef6', showlegend=False))
-                    fig.add_trace(go.Bar(x=[end - start], y=[1], orientation='h', marker_color='#0f62fe', base=[start], name=selected_gene))
-                    fig.update_layout(height=120, xaxis_title='bp', yaxis={'visible':False}, template='plotly_white', margin=dict(l=10,r=10,t=10,b=10))
-                    st.plotly_chart(fig, use_container_width=True)
+                    if df_ok(gene_density_df) and 'chromosome' in gene_density_df.columns:
+                        chr_len_row = gene_density_df[gene_density_df['chromosome'].astype(str) == str(gene_row.get('chromosome'))].iloc[0]
+                        if 'length_bp' in chr_len_row.index:
+                            chr_len = float(chr_len_row['length_bp'])
+                        elif 'length_Mb' in chr_len_row.index:
+                            chr_len = float(chr_len_row['length_Mb']) * 1e6
+                        else:
+                            raise ValueError('Chromosome length not available')
+
+                        start = float(gene_row.get('start', 0))
+                        end = float(gene_row.get('end', 0))
+                        # ensure sensible coordinates
+                        start, end = max(0, min(start, end)), max(start, end)
+
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(x=[chr_len], y=[1], orientation='h', marker_color='#e6eef6', showlegend=False))
+                        fig.add_trace(go.Bar(x=[end - start], y=[1], orientation='h', marker_color='#0f62fe', base=[start], name=selected_gene))
+                        fig.update_layout(height=120, xaxis_title='bp', yaxis={'visible':False}, template='plotly_white', margin=dict(l=10,r=10,t=10,b=10))
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info('Position visualization not available.')
                 except Exception:
                     st.info('Position visualization not available.')
 
@@ -337,28 +399,36 @@ elif nav == t['nav_insights']:
     st.header(t['nav_insights'])
     st.subheader(t['insights_header'])
     insights = []
-    if df_ok(gene_density_df):
-        # highest/lowest gene-density
-        hi = gene_density_df.loc[gene_density_df['gene_density_per_Mb'].idxmax()]
-        lo = gene_density_df.loc[gene_density_df['gene_density_per_Mb'].idxmin()]
-        insights.append(f"Highest gene-density chromosome: {hi['chromosome']} ({hi['gene_density_per_Mb']} genes/Mb)")
-        insights.append(f"Lowest gene-density chromosome: {lo['chromosome']} ({lo['gene_density_per_Mb']} genes/Mb)")
-        most_genes = gene_density_df.loc[gene_density_df['total_genes'].idxmax()]
-        insights.append(f"Chromosome with most genes: {most_genes['chromosome']} ({most_genes['total_genes']} genes)")
-        most_pc = gene_density_df.loc[gene_density_df['protein_coding'].idxmax()]
-        insights.append(f"Chromosome with most protein-coding genes: {most_pc['chromosome']} ({most_pc['protein_coding']} genes)")
-        pct_pc = (protein_coding / total_genes) * 100 if total_genes else None
-        if pct_pc is not None:
-            insights.append(f"Percentage of genes that are protein-coding: {pct_pc:.2f}%")
-    if df_ok(gc_density_df):
-        # compute spearman correlation data-driven
+    if df_ok(gene_density_df) and 'gene_density_per_Mb' in gene_density_df.columns:
         try:
-            rho = gc_density_df['GC_percent'].corr(gc_density_df['gene_density_per_Mb'], method='spearman')
+            hi = gene_density_df.loc[gene_density_df['gene_density_per_Mb'].astype(float).idxmax()]
+            lo = gene_density_df.loc[gene_density_df['gene_density_per_Mb'].astype(float).idxmin()]
+            insights.append(f"Highest gene-density chromosome: {hi['chromosome']} ({hi['gene_density_per_Mb']} genes/Mb)")
+            insights.append(f"Lowest gene-density chromosome: {lo['chromosome']} ({lo['gene_density_per_Mb']} genes/Mb)")
+            most_genes = gene_density_df.loc[gene_density_df['total_genes'].astype(int).idxmax()] if 'total_genes' in gene_density_df.columns else None
+            if most_genes is not None:
+                insights.append(f"Chromosome with most genes: {most_genes['chromosome']} ({most_genes['total_genes']} genes)")
+            most_pc = gene_density_df.loc[gene_density_df['protein_coding'].astype(int).idxmax()] if 'protein_coding' in gene_density_df.columns else None
+            if most_pc is not None:
+                insights.append(f"Chromosome with most protein-coding genes: {most_pc['chromosome']} ({most_pc['protein_coding']} genes)")
+            pct_pc = (protein_coding / total_genes) * 100 if total_genes else None
+            if pct_pc is not None:
+                insights.append(f"Percentage of genes that are protein-coding: {pct_pc:.2f}%")
+        except Exception:
+            pass
+
+    if df_ok(gc_density_df) and {'GC_percent','gene_density_per_Mb'}.issubset(gc_density_df.columns):
+        try:
+            rho = gc_density_df['GC_percent'].astype(float).corr(gc_density_df['gene_density_per_Mb'].astype(float), method='spearman')
             insights.append(f"{t['insights_spearman']}: {rho:.4f}")
         except Exception:
             insights.append(f"{t['insights_spearman']}: (calculation failed)")
-    for s in insights:
-        st.markdown(f"- {s}")
+
+    if not insights:
+        st.info(t['no_data'])
+    else:
+        for s in insights:
+            st.markdown(f"- {s}")
 
 elif nav == t['nav_salinity_research']:
     st.header(t['nav_salinity_research'])
@@ -372,7 +442,7 @@ elif nav == t['nav_salinity_research']:
 elif nav == t['nav_methods']:
     st.header(t['nav_methods'])
     st.markdown("## Data & Methods")
-    st.markdown("- Genome assembly: nuclear assembly used for Phoenix dactylifera (18 chromosomes).\n- Annotation source: supplied annotation CSVs in the data/ directory.\n- Gene counting: derived from the genome_annotation_summary.csv and chromosome_annotation_summary.csv files.\n- Protein-coding classification: based on gene_type == 'protein_coding' in genome_annotation_summary.csv.\n- Chromosome lengths: taken from chromosome_gene_density.csv length_bp / length_Mb columns.\n- GC calculation: per-chromosome GC % provided in chromosome_gc_gene_density_clean.csv.\n- Gene density: genes per Mb calculated as total_genes / length_Mb and provided in chromosome_gene_density.csv.\n- Salinity candidate identification: provided in salinity_candidates_categorized.csv with functional_category assignments.\n")
+    st.markdown("- Genome assembly: nuclear assembly used for Phoenix dactylifera (18 chromosomes).\n- Annotation source: supplied annotation CSVs in the data/ directory.\n- Gene counting: derived from the genome_annotation_summary.csv file when available; otherwise fallbacks are used to preserve stability.")
 
 elif nav == t['nav_downloads']:
     st.header(t['nav_downloads'])
@@ -386,8 +456,11 @@ elif nav == t['nav_downloads']:
     ]
     for label, path in files_to_offer:
         if os.path.exists(path):
-            with open(path, 'rb') as f:
-                st.download_button(label=f"Download {label}", data=f, file_name=label, mime='text/csv')
+            try:
+                with open(path, 'rb') as f:
+                    st.download_button(label=f"Download {label}", data=f, file_name=label, mime='text/csv')
+            except Exception:
+                st.write(f"{label}: unable to prepare download")
         else:
             st.write(f"{label}: not found")
 
